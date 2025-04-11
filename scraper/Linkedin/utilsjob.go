@@ -105,6 +105,7 @@ func StoreFailedJob(db *sql.DB, jobID, jobLink, reason string) error {
 	fmt.Printf("⚠️ Stored failed job: %s -> %s (Reason: %s)\n", jobID, jobLink, reason)
 	return nil
 }
+
 func navigateAndClickApply(ctx context.Context, db *sql.DB, jobID string, jobLink string) error {
 	// 1. Navigate to the job posting
 	err := chromedp.Run(ctx,
@@ -158,8 +159,6 @@ func navigateAndClickApply(ctx context.Context, db *sql.DB, jobID string, jobLin
 }
 
 
-
-
 type HuggingFaceResponse struct {
 	GeneratedText string `json:"generated_text"`
 }
@@ -178,10 +177,10 @@ func extractStructuredSummary(jobDescription string) (string, error) {
 	}
 
 	// Prompt construction
-	prompt := fmt.Sprintf(`Extract skills, jobtype that is given in the description, dont create new ones, and summarize the whole details into a summarized description and return in JSON format with fields: 
+	prompt := fmt.Sprintf(`Extract structured job details from the following job description and return in JSON format with fields:: 
 
 	- "job_type (remote, part time, full time,unknown)"
-	- "skills"
+	- "skills(techincal)"
 	- "description"
 
 	Description: "%s"`, jobDescription)
