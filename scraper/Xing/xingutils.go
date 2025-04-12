@@ -12,6 +12,7 @@ import (
 	//"strconv"
 	"time"
 	"strings"
+	"net/url"
 	
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
@@ -104,14 +105,14 @@ func navigateAndClickApply(ctx context.Context, db *sql.DB, jobID string, jobLin
 		return err
 	}
 
-	// // Step 5 (Commented Out): Click Apply Button
-	// err = chromedp.Run(ctx,
-	// 	chromedp.Click(`div.main-actions__ActionsContainer-sc-68c89ebb-0 button[data-testid="apply-button"]`, chromedp.NodeVisible),
-	// 	chromedp.Sleep(5*time.Second),
-	// )
-	// if err != nil {
-	// 	log.Printf("⚠️ Apply button click failed for jobID %s: %v\n", jobID, err)
-	// }
+	// Step 5 (Commented Out): Click Apply Button
+	err = chromedp.Run(ctx,
+		chromedp.Click(`div.main-actions__ActionsContainer-sc-68c89ebb-0 button[data-testid="apply-button"]`, chromedp.NodeVisible),
+		chromedp.Sleep(5*time.Second),
+	)
+	if err != nil {
+		log.Printf("⚠️ Apply button click failed for jobID %s: %v\n", jobID, err)
+	}
 
 	log.Printf("✅ Job %s processed and summarized", jobID)
 	return nil
@@ -123,50 +124,67 @@ func captureAndCloseNewTab(ctx context.Context, db *sql.DB, jobID string, existi
 	var newTabID target.ID
 	seen := make(map[string]bool)
 
+	// 🔍 Fetch current open tabs
 	newTabs, err := chromedp.Targets(ctx)
 	if err != nil {
 		log.Printf("❌ Failed to get updated open tabs: %v\n", err)
 		return err
 	}
 
+	// 🔎 Identify a new tab
 	for _, t := range newTabs {
-		if _, exists := existingTabs[t.TargetID]; !exists && t.Type == "page" && t.URL != "" && !strings.Contains(t.URL, "xing.com") {
-			cleanURL := strings.TrimSpace(t.URL)
-			if cleanURL == "" || seen[cleanURL] {
-				continue
-			}
-			seen[cleanURL] = true
-
-			if err := StoreApplicationLink(db, jobID, cleanURL); err != nil {
-				log.Printf("❌ Error storing application link in DB: %v\n", err)
-			} else {
-				fmt.Println("✅ Captured and stored application page:", cleanURL)
-			}
-
-			newTabID = t.TargetID
-			break
+		if _, exists := existingTabs[t.TargetID]; exists || t.Type != "page" || t.URL == "" {
+			continue
 		}
+
+		cleanURL := strings.TrimSpace(t.URL)
+		if cleanURL == "" || seen[cleanURL] {
+			continue
+		}
+
+		// Parse the URL to get the host (domain)
+		parsedURL, err := url.Parse(cleanURL)
+		if err != nil {
+			log.Printf("❌ Error parsing URL: %v\n", err)
+			continue
+		}
+
+		// Exclude if the host is "xing.com", but save if host is something else
+		if parsedURL.Host == "xing.com" {
+			continue
+		}
+
+		// ✅ Store the application link if it's not from "xing.com"
+		if err := StoreApplicationLink(db, jobID, cleanURL); err != nil {
+			log.Printf("❌ Error storing application link in DB: %v\n", err)
+		} else {
+			fmt.Println("✅ Captured and stored application page:", cleanURL)
+		}
+
+		seen[cleanURL] = true
+		newTabID = t.TargetID
+		break
 	}
 
+	// 🛑 Close the new tab if one was found
 	if newTabID != "" {
 		tabCtx, cancel := chromedp.NewContext(ctx, chromedp.WithTargetID(newTabID))
 		defer cancel()
 
-		err := chromedp.Run(tabCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		if err := chromedp.Run(tabCtx, chromedp.ActionFunc(func(ctx context.Context) error {
 			return target.CloseTarget(newTabID).Do(ctx)
-		}))
-		if err != nil {
+		})); err != nil {
 			log.Printf("❌ Error closing tab: %v\n", err)
 			return err
-		} else {
-			fmt.Println("✅ Successfully closed extra tab:", newTabID)
 		}
+
+		fmt.Println("✅ Successfully closed extra tab:", newTabID)
+	} else {
+		log.Println("⚠️ No new non-Xing tab found.")
 	}
 
 	return nil
 }
-
-
 
 
 type Joblinks struct {
