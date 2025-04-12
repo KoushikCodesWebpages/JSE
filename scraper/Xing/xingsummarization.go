@@ -1,22 +1,20 @@
-package Linkedin
+package Xing
 
 import (
-	"context"
+
+	"encoding/json"
 	"fmt"
 	"log"
-	"time"
-	"database/sql"
-	"strings"
-	//"path/filepath"
-	"github.com/chromedp/chromedp"
-	"bytes"
-	"encoding/json"
-	"io"
 	"net/http"
-	"github.com/joho/godotenv"
+	//"runtime"
+	//"strconv"
 	"os"
+	"strings"
+	"bytes"
+	"io"
+	"database/sql"
+	"github.com/joho/godotenv"
 )
-
 
 // Load .env on init
 func init() {
@@ -26,62 +24,11 @@ func init() {
 	}
 }
 
-func navigateAndClickApply(ctx context.Context, db *sql.DB, jobID string, jobLink string) error {
-	// 1. Navigate to the job posting
-	err := chromedp.Run(ctx,
-		chromedp.Navigate(jobLink),
-		chromedp.Sleep(5*time.Second),
-	)
-	if err != nil {
-		log.Printf("❌ Failed to navigate to job: %s -> %v\n", jobID, err)
-		StoreFailedJob(db, jobID, jobLink, "Navigation failed")
-		return err
-	}
-
-	// 2. Extract raw job description
-	var rawDescription string
-	err = chromedp.Run(ctx,
-		chromedp.Text(`#job-details`, &rawDescription, chromedp.NodeVisible, chromedp.ByID),
-	)
-	if err != nil || strings.TrimSpace(rawDescription) == "" {
-		log.Printf("❌ Failed to extract job description for jobID %s: %v\n", jobID, err)
-		StoreFailedJob(db, jobID, jobLink, "Description not found")
-		return err
-	}
-
-	// 3. Use Hugging Face to summarize and structure the description
-	summary, err := extractStructuredSummary(rawDescription)
-	if err != nil {
-		log.Printf("⚠️ Failed to summarize job description for jobID %s: %v\n", jobID, err)
-		// Optional fallback:
-		// summary = rawDescription
-	}
-
-	// 4. Store the job description (structured or raw)
-	err = storeJobDescription(db, jobID, jobLink, strings.TrimSpace(summary))
-	if err != nil {
-		log.Printf("❌ Failed to store job description for jobID %s: %v\n", jobID, err)
-		return err
-	}
-
-	// 5. Attempt to click Apply button AFTER extraction
-	err = chromedp.Run(ctx,
-		chromedp.Click(`div.jobs-apply-button--top-card button`, chromedp.NodeVisible),
-		chromedp.Sleep(3*time.Second),
-	)
-	if err != nil {
-		log.Printf("⚠️ Apply button not found for jobID %s: %v\n", jobID, err)
-		// Not critical — description already stored
-	}
-
-	log.Printf("✅ Job %s processed and Apply attempted", jobID)
-	return nil
-}
-
 
 type HuggingFaceResponse struct {
 	GeneratedText string `json:"generated_text"`
 }
+
 type HuggingFaceAPI struct {
 	URL string
 	Key string
@@ -117,10 +64,11 @@ func extractStructuredSummary(jobDescription string) (string, error) {
 }
 
 
+
 func callHuggingFaceAPI(apiURL, apiKey, jobDescription string) (string, error) {
 	prompt := fmt.Sprintf(`Extract structured job details from the following job description and return in JSON format with fields:: 
 - "job_type (remote, part time, full time, unknown)"
-- "skills (technical)"
+- "skills "
 - "description"
 
 Description: "%s"`, jobDescription)
@@ -227,7 +175,7 @@ func storeJobDescription(db *sql.DB, jobID, jobLink, summary string) error {
 	skillsCSV := strings.Join(parsed.Skills, ", ")
 
 	insertQuery := `
-		INSERT OR IGNORE INTO linkedin_job_description 
+		INSERT OR IGNORE INTO xing_job_description 
 		(job_id, job_link, job_description, job_type, skills) 
 		VALUES (?, ?, ?, ?, ?)
 	`

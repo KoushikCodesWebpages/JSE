@@ -59,56 +59,81 @@ func LoginXingHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Printf("✅ Loaded %d job titles with links.\n", len(jobLinks))
 
+	totalLinks := 0
+	for title, jobs := range jobLinks {
+		log.Printf("🔹 %s (%d jobs)\n", title, len(jobs))
+		totalLinks += len(jobs)
+	}
+	
+	log.Printf("📊 Total job links loaded: %d\n", totalLinks)
+
 	// Create a ChromeDP context
 	allocatorCtx, cancelAllocator := chromedp.NewRemoteAllocator(context.Background(), "http://localhost:"+remoteDebuggingPort)
 	defer cancelAllocator()
-	ctx, cancelCtx := chromedp.NewContext(allocatorCtx)
-	defer cancelCtx()
 
+
+	_, cancelCtx := chromedp.NewContext(allocatorCtx)
+	defer cancelCtx()
+	
 	// Optional: check that browser is responsive
-	if err := chromedp.Run(ctx, chromedp.Navigate("about:blank")); err != nil {
-		log.Printf("❌ Failed to navigate to blank page: %v\n", err)
-		http.Error(w, "Chromium not responsive", http.StatusInternalServerError)
-		return
-	}
 
 	// Process all job links
 	for title, jobs := range jobLinks {
 		fmt.Printf("📌 Processing jobs for: %s\n", title)
+	
 		for _, job := range jobs {
-			jobIDStr := job.ID
-			fmt.Println("🔗 Processing:", job.Link)
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("⚠️ Recovered from panic while processing job %s: %v\n", job.ID, r)
+					}
+				}()
 	
-			// Set 15-second timeout for this job
-			jobCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-			defer cancel()
+				jobIDStr := job.ID
+				fmt.Println("🔗 Processing:", job.Link)
 	
-			// Capture initial tabs
-			initialTabs, err := chromedp.Targets(jobCtx)
-			if err != nil {
-				log.Printf("❌ Failed to get initial open tabs: %v\n", err)
-				StoreFailedJob(db, jobIDStr, job.Link, "Failed to get initial open tabs")
-				continue
-			}
+				// ✅ Mark job as "being processed" immediately
+				updateQuery := `
+					UPDATE linkedin_jobs 
+					SET processed = TRUE 
+					WHERE id = ?
+				`
+				_, err := db.Exec(updateQuery, jobIDStr)
+				if err != nil {
+					log.Printf("❌ Failed to update job %s as processed: %v\n", jobIDStr, err)
+					// Optional: return here if you want to skip on failure
+				}
 	
-			existingTabs := make(map[target.ID]struct{})
-			for _, t := range initialTabs {
-				existingTabs[t.TargetID] = struct{}{}
-			}
+				// 🎯 Create new Chrome context
+				jobCtxBase, cancelBase := chromedp.NewContext(allocatorCtx)
+				defer cancelBase()
 	
-			// Navigate and click apply
-			err = navigateAndClickApply(jobCtx, db, jobIDStr, job.Link)
-			if err != nil {
-				continue
-			}
+				jobCtx, cancelJob := context.WithTimeout(jobCtxBase, 40*time.Second)
+				defer cancelJob()
 	
-			// Capture and close any newly opened tab
-			err = captureAndCloseNewTab(jobCtx, db, jobIDStr, existingTabs)
-			if err != nil {
-				StoreFailedJob(db, jobIDStr, job.Link, "Failed to capture and close new tab")
-				continue
-			}
-
+				startTime := time.Now()
+	
+				initialTabs, err := chromedp.Targets(jobCtx)
+				if err != nil {
+					log.Printf("⚠️ Skipping job %s - failed to get tabs: %v\n", jobIDStr, err)
+					return
+				}
+	
+				existingTabs := make(map[target.ID]struct{})
+				for _, t := range initialTabs {
+					existingTabs[t.TargetID] = struct{}{}
+				}
+	
+				if err := navigateAndClickApply(jobCtx, db, jobIDStr, job.Link); err != nil {
+					log.Printf("⚠️ Skipping job %s - navigation/apply failed: %v\n", jobIDStr, err)
+				} else {
+					if err := captureAndCloseNewTab(jobCtx, db, jobIDStr, existingTabs); err != nil {
+						log.Printf("⚠️ Skipping capture for job %s - error: %v\n", jobIDStr, err)
+					}
+				}
+	
+				fmt.Printf("⏱️ Job %s completed in %s\n", jobIDStr, time.Since(startTime))
+			}()
 		}
 	}
 	
@@ -128,6 +153,11 @@ func LoginXingHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type XingJobLinkDTO struct {
+	ID     int    `json:"id"`
+	JobID  string `json:"job_id"`
+	JobLink string `json:"job_link"`
+}
 
 func ViewXingJobs(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query("SELECT id, job_id, job_link FROM xing_job_application_links")
@@ -137,17 +167,49 @@ func ViewXingJobs(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var jobs []Joblinks
+	var jobs []XingJobLinkDTO
 	for rows.Next() {
-		var job Joblinks
-		if err := rows.Scan(&job.ID, &job.JobID, &job.Link); err != nil {
+		var job XingJobLinkDTO
+		if err := rows.Scan(&job.ID, &job.JobID, &job.JobLink); err != nil {
 			http.Error(w, "Failed to scan job", http.StatusInternalServerError)
 			return
 		}
 		jobs = append(jobs, job)
 	}
 
-	// Convert to JSON and return response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(jobs)
+}
+
+
+type XingJobDescription struct {
+	ID             int    `json:"id"`
+	JobID          string `json:"job_id"`
+	JobLink        string `json:"job_link"`
+	JobDescription string `json:"job_description"`
+	JobType        string `json:"job_type"`
+	Skills         string `json:"skills"`
+}
+
+
+func ViewXingJobDescriptions(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT id, job_id, job_link, job_description, job_type, skills FROM xing_job_description")
+	if err != nil {
+		http.Error(w, "Failed to fetch job descriptions", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var descriptions []XingJobDescription
+	for rows.Next() {
+		var desc XingJobDescription
+		if err := rows.Scan(&desc.ID, &desc.JobID, &desc.JobLink, &desc.JobDescription, &desc.JobType, &desc.Skills); err != nil {
+			http.Error(w, "Failed to scan job description", http.StatusInternalServerError)
+			return
+		}
+		descriptions = append(descriptions, desc)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(descriptions)
 }

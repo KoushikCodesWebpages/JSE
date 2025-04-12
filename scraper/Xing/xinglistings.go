@@ -150,7 +150,7 @@ func fetchAndStoreXingJobs(ctx context.Context, db *sql.DB, jobTitles []string, 
 					continue
 				}
 				count++
-				if count >= 5 {
+				if count >= 100 {
 					break
 				}
 			}
@@ -182,7 +182,7 @@ func XingJobListingsHandler(ctx context.Context, db *sql.DB) error {
 	defer cancelChrome()
 
 	// Define job titles and location
-	jobTitles := []string{"Data Scientist",
+	jobTitles := []string{//"Data Scientist",
 	// "Machine Learning Engineer",
 	// "Data Engineer",
 	// "Business Intelligence Developer",
@@ -198,7 +198,7 @@ func XingJobListingsHandler(ctx context.Context, db *sql.DB) error {
 	// "Solutions Architect",
 	// "IT Project Manager",
 	// "Database Administrator",
-	// "Software Engineer",
+	"Software Engineer",
 	// "Data Analyst",
 	// "Business Analyst",
 	// "Technical Program Manager",

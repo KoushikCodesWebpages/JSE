@@ -56,6 +56,9 @@ func main() {
 	mux.HandleFunc("/viewxingjobs", func(w http.ResponseWriter, r *http.Request) {
 		Xing.ViewXingJobs(db,w,r)
 	})
+	mux.HandleFunc("/viewxingdesc", func(w http.ResponseWriter, r *http.Request) {
+		Xing.ViewXingJobDescriptions(db,w,r)
+	})
 
 	
 

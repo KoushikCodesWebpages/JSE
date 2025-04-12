@@ -65,52 +65,58 @@ func StoreFailedJob(db *sql.DB, jobID, jobLink, reason string) error {
 	fmt.Printf("⚠️ Stored failed job: %s -> %s (Reason: %s)\n", jobID, jobLink, reason)
 	return nil
 }
-
 func navigateAndClickApply(ctx context.Context, db *sql.DB, jobID string, jobLink string) error {
-	// Step 1: Navigate to the job page
+	// Step 1: Navigate to the job page and wait for description container
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(jobLink),
-		chromedp.WaitVisible(`div.main-actions__ActionsContainer-sc-68c89ebb-0`, chromedp.ByQuery),
+		chromedp.WaitVisible(`div[class^='html-description__DescriptionContainer']`, chromedp.ByQuery),
 		chromedp.Sleep(2*time.Second),
 	)
 	if err != nil {
-		log.Printf("❌ Failed to navigate or wait for container: %s -> %v\n", jobID, err)
+		log.Printf("❌ Failed to navigate or wait for description container: %s -> %v\n", jobID, err)
 		StoreFailedJob(db, jobID, jobLink, "Navigation or container wait failed")
 		return err
 	}
 
-	// Step 2: Try clicking the button normally
-	chromedp.Run(ctx,
-		chromedp.Click(`div.main-actions__ActionsContainer-sc-68c89ebb-0 button[data-testid="apply-button"]`, chromedp.NodeVisible),
-		chromedp.Sleep(5*time.Second),
+	// Step 2: Extract raw job description
+	var rawDescription string
+	err = chromedp.Run(ctx,
+		chromedp.Text(`div[class^='html-description__DescriptionContainer']`, &rawDescription, chromedp.NodeVisible, chromedp.ByQuery),
 	)
+	if err != nil || strings.TrimSpace(rawDescription) == "" {
+		log.Printf("❌ Failed to extract job description for jobID %s: %v\n", jobID, err)
+		StoreFailedJob(db, jobID, jobLink, "Description not found")
+		return err
+	}
 
+	// Step 3: Summarize using Hugging Face
+	summary, err := extractStructuredSummary(rawDescription)
+	if err != nil {
+		log.Printf("⚠️ Failed to summarize job description for jobID %s: %v\n", jobID, err)
+		// Optional fallback: 
+		summary = rawDescription
+	}
+
+	// Step 4: Store summarized description
+	err = storeJobDescription(db, jobID, jobLink, strings.TrimSpace(summary))
+	if err != nil {
+		log.Printf("❌ Failed to store job description for jobID %s: %v\n", jobID, err)
+		return err
+	}
+
+	// // Step 5 (Commented Out): Click Apply Button
+	// err = chromedp.Run(ctx,
+	// 	chromedp.Click(`div.main-actions__ActionsContainer-sc-68c89ebb-0 button[data-testid="apply-button"]`, chromedp.NodeVisible),
+	// 	chromedp.Sleep(5*time.Second),
+	// )
 	// if err != nil {
-	// 	log.Printf("⚠️ Normal click failed, trying JS click for jobID %s\n", jobID)
-
-	// 	// Step 3: Fallback — click via JavaScript if normal click fails
-	// 	jsClick := `
-	// 		(() => {
-	// 			const container = document.querySelector('div.main-actions__ActionsContainer-sc-68c89ebb-0');
-	// 			if (container) {
-	// 				const button = container.querySelector('button[data-testid="apply-button"]');
-	// 				if (button) button.click();
-	// 			}
-	// 		})()
-	// 	`
-	// 	err = chromedp.Run(ctx,
-	// 		chromedp.Evaluate(jsClick, nil),
-	// 		chromedp.Sleep(5*time.Second),
-	// 	)
-	// 	if err != nil {
-	// 		log.Printf("❌ JS click also failed for jobID %s: %v\n", jobID, err)
-	// 		StoreFailedJob(db, jobID, jobLink, "Apply button JS click failed")
-	// 		return err
-	// 	}
+	// 	log.Printf("⚠️ Apply button click failed for jobID %s: %v\n", jobID, err)
 	// }
 
+	log.Printf("✅ Job %s processed and summarized", jobID)
 	return nil
 }
+
 
 
 func captureAndCloseNewTab(ctx context.Context, db *sql.DB, jobID string, existingTabs map[target.ID]struct{}) error {
@@ -183,3 +189,5 @@ func StoreApplicationLink(db *sql.DB, jobID, link string) error {
 	fmt.Printf("✅ Stored application link: %s\n", link)
 	return nil
 }
+
+

@@ -151,7 +151,7 @@ func fetchAndStoreJobs(ctx context.Context, db *sql.DB, jobTitles []string, loca
 					continue
 				}
 				count++
-				if count >= 5 {
+				if count >= 50 {
 					break
 				}
 			}
@@ -172,7 +172,7 @@ func LinkedinJobListingsHandler(ctx context.Context, db *sql.DB) error {
 	defer cancel()
 
 	jobTitles := []string{
-		"Data Scientist",
+		//"Data Scientist",
 		// "Machine Learning Engineer",
 		// "Data Engineer",
 		// "Business Intelligence Developer",
@@ -184,11 +184,11 @@ func LinkedinJobListingsHandler(ctx context.Context, db *sql.DB) error {
 		// "Full Stack Developer",
 		// "Cybersecurity Engineer",
 		// "UX Designer",
-		// "Product Manager",
+		"Product Manager",
 		// "Solutions Architect",
 		// "IT Project Manager",
 		// "Database Administrator",
-		// "Software Engineer",
+		//"Software Engineer",
 		// "Data Analyst",
 		// "Business Analyst",
 		// "Technical Program Manager",

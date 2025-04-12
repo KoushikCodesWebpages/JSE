@@ -11,6 +11,7 @@ import (
 	"runtime"
 	//"strconv"
 	"time"
+	//"errors"
 	
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
@@ -53,7 +54,15 @@ func LoginLinkedInHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to load job links", http.StatusInternalServerError)
 		return
 	}
-	fmt.Printf("✅ Loaded %d job titles with links.\n", len(jobLinks))
+	log.Printf("✅ Loaded %d job titles with links.\n", len(jobLinks))
+
+	totalLinks := 0
+	for title, jobs := range jobLinks {
+		log.Printf("🔹 %s (%d jobs)\n", title, len(jobs))
+		totalLinks += len(jobs)
+	}
+	
+	log.Printf("📊 Total job links loaded: %d\n", totalLinks)
 
 	// Create ChromeDP allocator context
 	allocatorCtx, cancelAllocator := chromedp.NewRemoteAllocator(context.Background(), "http://localhost:9222")
@@ -62,52 +71,68 @@ func LoginLinkedInHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	// Create root ChromeDP context
 	_, cancelCtx := chromedp.NewContext(allocatorCtx)
 	defer cancelCtx()
-
-	// Process all job links
+	
 	for title, jobs := range jobLinks {
 		fmt.Printf("📌 Processing jobs for: %s\n", title)
-
+	
 		for _, job := range jobs {
-			jobIDStr := job.ID
-			fmt.Println("🔗 Processing:", job.Link)
-
-			// Create isolated ChromeDP context and timeout for this job
-			jobCtxBase, cancelBase := chromedp.NewContext(allocatorCtx)
-			jobCtx, cancelJob := context.WithTimeout(jobCtxBase, 30*time.Second)
-
-			startTime := time.Now()
-
-			// Capture initial tabs
-			initialTabs, err := chromedp.Targets(jobCtx)
-			if err != nil {
-				log.Printf("❌ Failed to get initial open tabs: %v\n", err)
-				StoreFailedJob(db, jobIDStr, job.Link, "Failed to get initial open tabs")
-				cancelJob()
-				cancelBase()
-				continue
-			}
-
-			existingTabs := make(map[target.ID]struct{})
-			for _, t := range initialTabs {
-				existingTabs[t.TargetID] = struct{}{}
-			}
-
-			// Process job
-			err = navigateAndClickApply(jobCtx, db, jobIDStr, job.Link)
-			if err == nil {
-				err = captureAndCloseNewTab(jobCtx, db, jobIDStr, existingTabs)
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("⚠️ Recovered from panic while processing job %s: %v\n", job.ID, r)
+					}
+				}()
+	
+				jobIDStr := job.ID
+				fmt.Println("🔗 Processing:", job.Link)
+	
+				// ✅ Mark job as "being processed" immediately
+				updateQuery := `
+					UPDATE linkedin_jobs 
+					SET processed = TRUE 
+					WHERE id = ?
+				`
+				_, err := db.Exec(updateQuery, jobIDStr)
 				if err != nil {
-					StoreFailedJob(db, jobIDStr, job.Link, "Failed to capture and close new tab")
+					log.Printf("❌ Failed to update job %s as processed: %v\n", jobIDStr, err)
+					// Optional: return here if you want to skip on failure
 				}
-			}
-
-			fmt.Printf("⏱️ Job %s completed in %s\n", jobIDStr, time.Since(startTime))
-
-			// Clean up
-			cancelJob()
-			cancelBase()
+	
+				// 🎯 Create new Chrome context
+				jobCtxBase, cancelBase := chromedp.NewContext(allocatorCtx)
+				defer cancelBase()
+	
+				jobCtx, cancelJob := context.WithTimeout(jobCtxBase, 40*time.Second)
+				defer cancelJob()
+	
+				startTime := time.Now()
+	
+				initialTabs, err := chromedp.Targets(jobCtx)
+				if err != nil {
+					log.Printf("⚠️ Skipping job %s - failed to get tabs: %v\n", jobIDStr, err)
+					return
+				}
+	
+				existingTabs := make(map[target.ID]struct{})
+				for _, t := range initialTabs {
+					existingTabs[t.TargetID] = struct{}{}
+				}
+	
+				if err := navigateAndClickApply(jobCtx, db, jobIDStr, job.Link); err != nil {
+					log.Printf("⚠️ Skipping job %s - navigation/apply failed: %v\n", jobIDStr, err)
+				} else {
+					if err := captureAndCloseNewTab(jobCtx, db, jobIDStr, existingTabs); err != nil {
+						log.Printf("⚠️ Skipping capture for job %s - error: %v\n", jobIDStr, err)
+					}
+				}
+	
+				fmt.Printf("⏱️ Job %s completed in %s\n", jobIDStr, time.Since(startTime))
+			}()
 		}
 	}
+	
+	
+	
 
 	// Stop Chromium process
 	fmt.Println("🛑 Closing Chromium...")
