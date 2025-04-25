@@ -53,6 +53,7 @@ func setupChromedpContext() (context.Context, context.CancelFunc) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", false), // Disable headless mode (optional)
 		chromedp.Flag("executable-path", "/snap/bin/chromium"),
+		chromedp.Flag("window-size", "800,600"),
 	)
 
 	allocatorCtx, allocatorCancel := chromedp.NewExecAllocator(context.Background(), opts...)
@@ -172,28 +173,28 @@ func LinkedinJobListingsHandler(ctx context.Context, db *sql.DB) error {
 	defer cancel()
 
 	jobTitles := []string{
-		//"Data Scientist",
-		// "Machine Learning Engineer",
-		// "Data Engineer",
-		// "Business Intelligence Developer",
-		// "Artificial Intelligence Engineer",
-		// "Natural Language Processing Engineer",
-		// "Computer Vision Engineer",
-		// "DevOps Engineer",
-		// "Cloud Engineer",
-		// "Full Stack Developer",
-		// "Cybersecurity Engineer",
-		// "UX Designer",
-		"Product Manager",
-		// "Solutions Architect",
-		// "IT Project Manager",
-		// "Database Administrator",
-		//"Software Engineer",
-		// "Data Analyst",
-		// "Business Analyst",
-		// "Technical Program Manager",
-		// "ML Ops",
-	}
+		"Logistics Coordinator",
+		"Supply Chain Specialist",
+		"Procurement Specialist",
+		"Financial Analyst",
+		"Accounts Specialist",
+		"Management Accountant",
+		"Operations Manager ",
+		"Project Coordinator ",
+		"Supply Chain Analyst",
+		"Mechanical Design Engineer",
+		"Automation Engineer",
+		"Production Engineer",
+		"Logistics Chain Analyst",
+		"Supply Chain Consultant",
+		"Procurement Analyst",
+		"Sports Marketing Manager",
+		"Business Development Manager",
+		"Sponsorship Manager",
+		"Business Analyst",
+		"Relationship Manager",
+		}
+
 	location := "Berlin, Germany"
 	dateSincePosted := ""
 

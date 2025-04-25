@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+
 	"log"
 	"net/http"
 	"os"
@@ -18,9 +18,6 @@ import (
 
 )
 
-func suppressLogs() {
-	log.SetOutput(ioutil.Discard) // Disables all logs
-}
 
 func main() {
 	// Initialize the database
@@ -36,6 +33,14 @@ func main() {
 
 	// Create a new HTTP request multiplexer (mux)
 	mux := http.NewServeMux()
+
+	mux.HandleFunc("/uploadjobs", func(w http.ResponseWriter, r *http.Request) {
+		scraper.UploadHandler(w, r, db) // Fetch and display job listings from LinkedIn and Xing
+	})
+	
+
+
+
 
 	// Define the routes and their handlers
 	mux.HandleFunc("/joblistings", func(w http.ResponseWriter, r *http.Request) {

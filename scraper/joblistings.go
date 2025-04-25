@@ -32,7 +32,7 @@ type JobResponse struct {
 func JobListingsHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	ctx := context.Background()
 
-	// Run Xing scraper
+	//Run Xing scraper
 	if err := Xing.XingJobListingsHandler(ctx, db); err != nil {
 		http.Error(w, "Xing error: "+err.Error(), http.StatusInternalServerError)
 		return

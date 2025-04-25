@@ -108,7 +108,7 @@ func LoginXingHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 				jobCtxBase, cancelBase := chromedp.NewContext(allocatorCtx)
 				defer cancelBase()
 	
-				jobCtx, cancelJob := context.WithTimeout(jobCtxBase, 40*time.Second)
+				jobCtx, cancelJob := context.WithTimeout(jobCtxBase, 30*time.Second)
 				defer cancelJob()
 	
 				startTime := time.Now()

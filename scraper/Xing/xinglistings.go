@@ -36,6 +36,7 @@ func StartChrome() (*exec.Cmd, error) {
 	cmd := exec.Command(chromePath,
 		"--remote-debugging-port=9222",
 		"--profile-directory=Profile 6",
+		"--window-size=800,600", 
 		"https://www.xing.com/",
 	)
 
@@ -121,9 +122,30 @@ func fetchAndStoreXingJobs(ctx context.Context, db *sql.DB, jobTitles []string, 
 				return chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight);`, nil).Do(ctx)
 			}),
 			chromedp.Sleep(2*time.Second),
-
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				return chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight);`, nil).Do(ctx)
+			}),
+			chromedp.Sleep(2*time.Second),
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				return chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight);`, nil).Do(ctx)
+			}),
+			chromedp.Sleep(2*time.Second),
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				return chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight);`, nil).Do(ctx)
+			}),
+			chromedp.Sleep(2*time.Second),
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				return chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight);`, nil).Do(ctx)
+			}),
+			chromedp.Sleep(2*time.Second),
+			chromedp.Sleep(2*time.Second),
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				return chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight);`, nil).Do(ctx)
+			}),
+			chromedp.Sleep(2*time.Second),
 			// Wait for job listings to appear
 			chromedp.WaitVisible(`[data-testid="job-search-result"]`, chromedp.ByQuery),
+			
 
 			// Extract job data
 			chromedp.Evaluate(`Array.from(document.querySelectorAll('[data-testid="job-search-result"]')).map(el => ({
@@ -150,7 +172,7 @@ func fetchAndStoreXingJobs(ctx context.Context, db *sql.DB, jobTitles []string, 
 					continue
 				}
 				count++
-				if count >= 100 {
+				if count >= 50 {
 					break
 				}
 			}
@@ -182,28 +204,29 @@ func XingJobListingsHandler(ctx context.Context, db *sql.DB) error {
 	defer cancelChrome()
 
 	// Define job titles and location
-	jobTitles := []string{//"Data Scientist",
-	// "Machine Learning Engineer",
-	// "Data Engineer",
-	// "Business Intelligence Developer",
-	// "Artificial Intelligence Engineer",
-	// "Natural Language Processing Engineer",
-	// "Computer Vision Engineer",
-	// "DevOps Engineer",
-	// "Cloud Engineer",
-	// "Full Stack Developer",
-	// "Cybersecurity Engineer",
-	// "UX Designer",
-	// "Product Manager",
-	// "Solutions Architect",
-	// "IT Project Manager",
-	// "Database Administrator",
-	"Software Engineer",
-	// "Data Analyst",
-	// "Business Analyst",
-	// "Technical Program Manager",
-	// "ML Ops",
-	}
+
+	jobTitles := []string{
+		"Logistics Coordinator",
+		"Supply Chain Specialist",
+		"Procurement Specialist",
+		"Financial Analyst",
+		"Accounts Specialist",
+		"Management Accountant",
+		"Operations Manager ",
+		"Project Coordinator ",
+		"Supply Chain Analyst",
+		"Mechanical Design Engineer",
+		"Automation Engineer",
+		"Production Engineer",
+		"Logistics Chain Analyst",
+		"Supply Chain Consultant",
+		"Procurement Analyst",
+		"Sports Marketing Manager",
+		"Business Development Manager",
+		"Sponsorship Manager",
+		"Business Analyst",
+		"Relationship Manager",
+		}
 	location := "Berlin, Germany"
 
 	// Fetch and store Xing jobs

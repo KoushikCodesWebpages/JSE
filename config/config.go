@@ -19,17 +19,18 @@ func InitializeDatabase() (*sql.DB, error) {
 	}
 
 	if dbExists {
-		fmt.Println("📂 Existing DB found, dropping selected tables...")
+		// fmt.Println("📂 Existing DB found, dropping selected tables...")
 
 		tablesToDrop := []string{
-			//"linkedin_jobs",
-			//"xing_jobs",
-			//"linkedin_failed_jobs",
-			//"xing_failed_jobs",
-			"linkedin_job_application_links",
-			"xing_job_application_links",
-			"linkedin_job_description",
-			"xing_job_description",
+			// "linkedin_jobs",
+			// "xing_jobs",
+			// "linkedin_job_application_links",
+			// "xing_job_application_links",
+			// "linkedin_job_description",
+			// "xing_job_description",
+
+			// "linkedin_failed_jobs",
+			// "xing_failed_jobs",
 		}
 
 		for _, table := range tablesToDrop {
@@ -44,29 +45,80 @@ func InitializeDatabase() (*sql.DB, error) {
 	}
 
 	// SQL statements for table creation
-	createLinkedInJobsTable := `
-	CREATE TABLE IF NOT EXISTS linkedin_jobs (
-		id TEXT PRIMARY KEY,
-		jobid TEXT UNIQUE,  
-		title TEXT,
-		company TEXT,
-		location TEXT,
-		posted_date TEXT,
-		link TEXT UNIQUE,  
-		processed BOOLEAN
-	);`
+		createLinkedInJobsTable := `
+		CREATE TABLE IF NOT EXISTS linkedin_jobs (
+			id TEXT PRIMARY KEY,
+			jobid TEXT UNIQUE,  
+			title TEXT,
+			company TEXT,
+			location TEXT,
+			posted_date TEXT,
+			link TEXT UNIQUE,  
+			processed BOOLEAN
+		);`
 
-	createXingJobsTable := `
-	CREATE TABLE IF NOT EXISTS xing_jobs (
-		id TEXT PRIMARY KEY,
-		jobid TEXT UNIQUE,  		
-		title TEXT,
-		company TEXT,
-		location TEXT,
-		posted_date TEXT,
-		link TEXT UNIQUE,  
-		processed BOOLEAN
-	);`
+		createXingJobsTable := `
+		CREATE TABLE IF NOT EXISTS xing_jobs (
+			id TEXT PRIMARY KEY,
+			jobid TEXT UNIQUE,  		
+			title TEXT,
+			company TEXT,
+			location TEXT,
+			posted_date TEXT,
+			link TEXT UNIQUE,  
+			processed BOOLEAN
+		);`
+
+		createLinkedInJobApplicationLinksTable := `
+		CREATE TABLE IF NOT EXISTS linkedin_job_application_links (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			job_id TEXT,
+			job_link TEXT UNIQUE,
+			FOREIGN KEY (job_id) REFERENCES linkedin_jobs(id) ON DELETE CASCADE
+		);`
+
+		createXingJobApplicationLinksTable := `
+		CREATE TABLE IF NOT EXISTS xing_job_application_links (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			job_id TEXT,
+			job_link TEXT,
+			UNIQUE(job_id, job_link),
+			FOREIGN KEY (job_id) REFERENCES xing_jobs(id) ON DELETE CASCADE
+		);`
+
+		createLinkedInJobDescTable := `
+		CREATE TABLE IF NOT EXISTS linkedin_job_description (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			job_id TEXT UNIQUE,
+			job_link TEXT UNIQUE,
+			job_description TEXT,
+			job_type TEXT,
+			skills TEXT,
+			FOREIGN KEY (job_id) REFERENCES linkedin_job_application_links(id) ON DELETE CASCADE,
+			FOREIGN KEY (job_link) REFERENCES linkedin_job_application_links(job_link) ON DELETE CASCADE
+		);`
+		
+		createXingJobDescTable := `
+		CREATE TABLE IF NOT EXISTS xing_job_description (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			job_id TEXT UNIQUE,
+			job_link TEXT UNIQUE,
+			job_description TEXT,
+			job_type TEXT,
+			skills TEXT,
+			FOREIGN KEY (job_id) REFERENCES xing_job_application_links(id) ON DELETE CASCADE,
+			FOREIGN KEY (job_link) REFERENCES xing_job_application_links(job_link) ON DELETE CASCADE
+		);`
+		
+
+
+
+
+
+
+
+
+
 
 	createLinkedInFailedJobsTable := `
 	CREATE TABLE IF NOT EXISTS linkedin_failed_jobs (
@@ -84,47 +136,7 @@ func InitializeDatabase() (*sql.DB, error) {
 		FOREIGN KEY (job_id) REFERENCES xing_jobs(id) ON DELETE CASCADE
 	);`
 
-	createLinkedInJobApplicationLinksTable := `
-	CREATE TABLE IF NOT EXISTS linkedin_job_application_links (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		job_id TEXT,
-		job_link TEXT UNIQUE,
-		FOREIGN KEY (job_id) REFERENCES linkedin_jobs(id) ON DELETE CASCADE
-	);`
 
-	createXingJobApplicationLinksTable := `
-	CREATE TABLE IF NOT EXISTS xing_job_application_links (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		job_id TEXT,
-		job_link TEXT,
-		UNIQUE(job_id, job_link),
-		FOREIGN KEY (job_id) REFERENCES xing_jobs(id) ON DELETE CASCADE
-	);`
-
-	createLinkedInJobDescTable := `
-	CREATE TABLE IF NOT EXISTS linkedin_job_description (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		job_id TEXT UNIQUE,
-		job_link TEXT UNIQUE,
-		job_description TEXT,
-		job_type TEXT,
-		skills TEXT,
-		FOREIGN KEY (job_id) REFERENCES linkedin_job_application_links(id) ON DELETE CASCADE,
-		FOREIGN KEY (job_link) REFERENCES linkedin_job_application_links(job_link) ON DELETE CASCADE
-	);`
-	
-	createXingJobDescTable := `
-	CREATE TABLE IF NOT EXISTS xing_job_description (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		job_id TEXT UNIQUE,
-		job_link TEXT UNIQUE,
-		job_description TEXT,
-		job_type TEXT,
-		skills TEXT,
-		FOREIGN KEY (job_id) REFERENCES xing_job_application_links(id) ON DELETE CASCADE,
-		FOREIGN KEY (job_link) REFERENCES xing_job_application_links(job_link) ON DELETE CASCADE
-	);`
-	
 
 	// Execute table creation queries
 	for _, query := range []string{

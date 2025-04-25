@@ -204,7 +204,6 @@ type JobDescription struct {
 	JobDescription string `json:"job_description"`
 	JobType     string   `json:"job_type"`
 	Skills      []string `json:"skills"`
-	Description string   `json:"description"`
 }
 
 func ViewLinkedInJobDescriptions(db *sql.DB, w http.ResponseWriter, r *http.Request) {
@@ -227,7 +226,7 @@ func ViewLinkedInJobDescriptions(db *sql.DB, w http.ResponseWriter, r *http.Requ
 			&job.ID,
 			&job.JobID,
 			&job.JobLink,
-			&job.Description,  // stored as job_description in DB, mapped to Description field
+			&job.JobDescription,  // stored as job_description in DB, mapped to Description field
 			&job.JobType,
 			&skillsStr,
 		)
