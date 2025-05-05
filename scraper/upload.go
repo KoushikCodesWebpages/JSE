@@ -1,127 +1,121 @@
 package scraper
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-
-
+	"time"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	_ "github.com/mattn/go-sqlite3"
-	_ "github.com/go-sql-driver/mysql"
 )
 
-// Job model used during migration
+// Job model
 type Job struct {
-	JobID          string
-	Title          string
-	Company        string
-	Location       string
-	PostedDate     string
-	Link           string
-	Processed      bool
-	Source         string // LinkedIn or Xing
-	JobDescription string
-	JobType        string
-	Skills         string
-	JobLink        string
+	JobID          string `json:"job_id" bson:"job_id"`
+	Title          string `json:"title" bson:"title"`
+	Company        string `json:"company" bson:"company"`
+	Location       string `json:"location" bson:"location"`
+	PostedDate     string `json:"posted_date" bson:"posted_date"`
+	Link           string `json:"link" bson:"link"`
+	Processed      bool   `json:"processed" bson:"processed"`
+	Source         string `json:"source" bson:"source"`
+	JobDescription string `json:"job_description" bson:"job_description"`
+	JobType        string `json:"job_type" bson:"job_type"`
+	Skills         string `json:"skills" bson:"skills"`
+	JobLink        string `json:"job_link" bson:"job_link"`
 }
 
-// UploadHandler handles the migration from SQLite to MySQL
-// UploadHandler handles the migration from SQLite to MySQL
+
+// UploadHandler connects to MongoDB, fetches jobs from SQLite, and prints them
 func UploadHandler(w http.ResponseWriter, r *http.Request, sqliteDB *sql.DB) {
-	// Connect to MySQL
-	mysqlDSN := fmt.Sprintf(
-		"%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		"root",
-		"idNxcPPQFpRyAsufSVAoPtwhdrNFGfAe",
-		"crossover.proxy.rlwy.net",
-		57423,
-		"railway",
-	)
-	mysqlDB, err := sql.Open("mysql", mysqlDSN)
+	// MongoDB hardcoded credentials
+	// mongoURI := "mongodb+srv://JSE:JSE@cluster0.dnetqn5.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0&tls=true"
+	mongoURI :="mongodb://localhost:27017/JSE"
+	mongoDBName := "JSE"
+	mongoCollectionName := "jobs"
+
+	// Connect to MongoDB
+	clientOpts := options.Client().ApplyURI(mongoURI)
+	client, err := mongo.NewClient(clientOpts)
 	if err != nil {
-		http.Error(w, "MySQL connection failed: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "MongoDB client creation failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer mysqlDB.Close()
 
-	// Print the table names in MySQL
-	rows, err := mysqlDB.Query("SHOW TABLES")
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	err = client.Connect(ctx)
 	if err != nil {
-		http.Error(w, "Failed to retrieve table names: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "MongoDB connection failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer client.Disconnect(ctx)
 
-	// Collect all table names
-	var tableName string
-	var tableNames []string
-	for rows.Next() {
-		if err := rows.Scan(&tableName); err != nil {
-			http.Error(w, "Failed to scan table name: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		tableNames = append(tableNames, tableName)
-	}
+	log.Println("✅ Connected to MongoDB database:", mongoDBName)
 
-	// Check for errors after iteration
-	if err := rows.Err(); err != nil {
-		http.Error(w, "Error while iterating over tables: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Print the table names
-	log.Printf("MySQL Tables: %v", tableNames)
-
-	// Collect jobs from SQLite
+	// Fetch jobs from SQLite
 	jobs, err := CollectJobs(sqliteDB)
 	if err != nil {
 		http.Error(w, "Failed to collect jobs: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Upload jobs and count success/failure
-	var successCount, failureCount int
+	// Insert jobs into MongoDB
+	collection := client.Database(mongoDBName).Collection(mongoCollectionName)
+	var mongoJobs []interface{}
 	for _, job := range jobs {
-		var err error
-		switch job.Source {
-		case "LinkedIn":
-			// Uncomment the following line for actual upload
-			err = uploadLinkedInJob(mysqlDB, job)
-			log.Printf("Uploading LinkedIn job: %s", job.JobID) // For debugging
-		case "Xing":
-			// Uncomment the following line for actual upload
-			err = uploadXingJob(mysqlDB, job)
-			log.Printf("Uploading Xing job: %s", job.JobID) // For debugging
-		}
-		
-		// For demo, simulate success or failure
-		if err != nil {
-			log.Printf("❌ Failed to upload job %s (%s): %v", job.JobID, job.Source, err)
-			failureCount++
-		} else {
-			successCount++
-		}
+		mongoJobs = append(mongoJobs, job)
 	}
 
-	// Print total uploaded data
-	log.Printf("Upload completed: Success: %d | Failures: %d", successCount, failureCount)
+	if len(mongoJobs) > 0 {
+		_, err := collection.InsertMany(ctx, mongoJobs)
+		if err != nil {
+			http.Error(w, "Failed to insert jobs into MongoDB: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("✅ Inserted %d jobs into MongoDB", len(mongoJobs))
+	}
 
-	// Response with the uploaded job count
+	// Retrieve all jobs from MongoDB
+	cursor, err := collection.Find(ctx, bson.D{})
+	if err != nil {
+		http.Error(w, "Failed to retrieve jobs from MongoDB: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var mongoJobsList []Job
+	for cursor.Next(ctx) {
+		var job Job
+		if err := cursor.Decode(&job); err != nil {
+			http.Error(w, "Failed to decode job: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		mongoJobsList = append(mongoJobsList, job)
+	}
+
+	if err := cursor.Err(); err != nil {
+		http.Error(w, "Cursor error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Output jobs from MongoDB as JSON
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"tables":        tableNames,
-		"uploaded_jobs": jobs,
-		"count":         len(jobs),
-		"success_count": successCount,
-		"failure_count": failureCount,
-	})
+	err = json.NewEncoder(w).Encode(mongoJobsList)
+	if err != nil {
+		http.Error(w, "Failed to encode jobs to JSON: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 
-
+// CollectJobs fetches LinkedIn and Xing jobs from SQLite
 func CollectJobs(db *sql.DB) ([]Job, error) {
 	var jobs []Job
 
@@ -204,63 +198,4 @@ func CollectJobs(db *sql.DB) ([]Job, error) {
 	}
 
 	return jobs, nil
-}
-
-func uploadLinkedInJob(db *sql.DB, job Job) error {
-	// Insert job metadata into `linked_in_job_meta_data`, excluding the ID field
-	_, err := db.Exec(`
-		INSERT IGNORE INTO linked_in_job_meta_data (id, job_id, title, company, location, posted_date, link, processed)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		job.JobID, job.JobID, job.Title, job.Company, job.Location, job.PostedDate, job.Link, job.Processed)
-	if err != nil {
-		return fmt.Errorf("linkedin_jobs_meta_data insert: %w", err)
-	}
-
-	// Insert job description into `linked_in_job_descriptions`
-	_, err = db.Exec(`
-		INSERT IGNORE INTO linked_in_job_descriptions (job_id, job_link, job_description, job_type, skills)
-		VALUES (?, ?, ?, ?, ?)`,
-		job.JobID, job.JobLink, job.JobDescription, job.JobType, job.Skills)
-	if err != nil {
-		return fmt.Errorf("linkedin_job_description insert: %w", err)
-	}
-
-	// Insert job application link into `linked_in_job_application_links`
-	_, err = db.Exec(`
-		INSERT IGNORE INTO linked_in_job_application_links (job_id, job_link)
-		VALUES (?, ?)`,
-		job.JobID, job.JobLink)
-	if err != nil {
-		return fmt.Errorf("linkedin_job_application_links insert: %w", err)
-	}
-
-	return nil
-}
-
-// Upload Xing job
-func uploadXingJob(db *sql.DB, job Job) error {
-	_, err := db.Exec(`
-		INSERT IGNORE INTO xing_jobs (id, title, company, location, posted_date, link, processed)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		job.JobID, job.Title, job.Company, job.Location, job.PostedDate, job.Link, job.Processed)
-	if err != nil {
-		return fmt.Errorf("xing_jobs insert: %w", err)
-	}
-
-	_, err = db.Exec(`
-		INSERT IGNORE INTO xing_job_description (job_id, job_description, job_type, skills)
-		VALUES (?, ?, ?, ?)`,
-		job.JobID, job.JobDescription, job.JobType, job.Skills)
-	if err != nil {
-		return fmt.Errorf("xing_job_description insert: %w", err)
-	}
-
-	_, err = db.Exec(`
-		INSERT IGNORE INTO xing_job_application_links (job_id, job_link)
-		VALUES (?, ?)`,
-		job.JobID, job.JobLink)
-	if err != nil {
-		return fmt.Errorf("xing_job_application_links insert: %w", err)
-	}
-	return nil
 }

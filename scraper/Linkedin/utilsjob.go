@@ -14,7 +14,6 @@ import (
 	"io"
 	"net/http"
 	"github.com/joho/godotenv"
-	"os"
 )
 
 
@@ -77,111 +76,19 @@ func navigateAndClickApply(ctx context.Context, db *sql.DB, jobID string, jobLin
 	log.Printf("✅ Job %s processed and Apply attempted", jobID)
 	return nil
 }
-
-
-type HuggingFaceResponse struct {
-	GeneratedText string `json:"generated_text"`
-}
-type HuggingFaceAPI struct {
-	URL string
-	Key string
+// Struct to hold the API response from Ollama
+type OllamaResponse struct {
+	Response string `json:"response"`
 }
 
-var huggingFaceAPIs []HuggingFaceAPI
-
-func init() {
-	apiKey := os.Getenv("HF_API_KEY")
-
-	// Loop through 10 model URLs: HF_API_URL_1 to HF_API_URL_10
-	for i := 1; i <= 10; i++ {
-		envVar := fmt.Sprintf("HF_MODEL_%d", i)
-		modelURL := os.Getenv(envVar)
-		if modelURL != "" {
-			huggingFaceAPIs = append(huggingFaceAPIs, HuggingFaceAPI{
-				URL: modelURL,
-				Key: apiKey,
-			})
-		}
-	}
-}
-
-func extractStructuredSummary(jobDescription string) (string, error) {
-	for _, api := range huggingFaceAPIs {
-		output, err := callHuggingFaceAPI(api.URL, api.Key, jobDescription)
-		if err == nil && output != "" {
-			return output, nil
-		}
-		log.Printf("⚠️ Failed with %s: %v", api.URL, err)
-	}
-	return "", fmt.Errorf("all Hugging Face API calls failed")
-}
-
-
-func callHuggingFaceAPI(apiURL, apiKey, jobDescription string) (string, error) {
-	prompt := fmt.Sprintf(`Extract structured job details from the following job description and return in JSON format with fields:: 
-- "job_type (remote, part time, full time, unknown)"
-- "skills (technical)"
-- "description"
-
-Description: "%s"`, jobDescription)
-
-	payload := map[string]interface{}{
-		"inputs": prompt,
-		"parameters": map[string]interface{}{
-			"max_length":  1000,
-			"temperature": 0.3,
-		},
-	}
-
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal request payload: %v", err)
-	}
-
-	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(payloadBytes))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %v", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("hugging face request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response body: %v", err)
-	}
-
-	var result []HuggingFaceResponse
-	err = json.Unmarshal(body, &result)
-	if err != nil || len(result) == 0 {
-		return "", fmt.Errorf("failed to parse API response: %v", err)
-	}
-
-	output := result[0].GeneratedText
-
-	// Extract JSON block from output text
-	jsonStart := strings.Index(output, "{")
-	jsonEnd := strings.LastIndex(output, "}")
-	if jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart {
-		output = output[jsonStart : jsonEnd+1]
-	}
-
-	return strings.TrimSpace(output), nil
-}
-
-
+// Struct for the job summary details
 type FlexibleJobSummary struct {
 	JobType     string   `json:"job_type"`
 	Skills      []string `json:"skills"`
 	Description string   `json:"description"`
 }
 
+// Unmarshal the JSON response from Ollama
 func (f *FlexibleJobSummary) UnmarshalJSON(data []byte) error {
 	type Alias FlexibleJobSummary
 	aux := &struct {
@@ -216,6 +123,65 @@ func (f *FlexibleJobSummary) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Extract structured summary using Ollama API locally
+func extractStructuredSummary(jobDescription string) (string, error) {
+	// Call the local Ollama API
+	output, err := callOllamaAPI(jobDescription)
+	if err != nil || output == "" {
+		log.Printf("⚠️ Failed to summarize job description: %v\n", err)
+		return "", err
+	}
+	return output, nil
+}
+
+// Function to call Ollama API
+func callOllamaAPI(jobDescription string) (string, error) {
+	// Construct the prompt for Ollama
+	prompt := fmt.Sprintf(`Extract job_type, skills, and description from this job posting: "%s". Return JSON.`, jobDescription)
+
+	// Prepare the request payload
+	payload := map[string]interface{}{
+		"model":   "phi",       // Use the phi model or adjust if you are using a different model
+		"prompt":  prompt,
+		"stream":  false,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request payload: %v", err)
+	}
+
+	// Send the request to the local Ollama API
+	req, err := http.NewRequest("POST", "http://localhost:11434/api/generate", bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("ollama request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read and process the response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	// Parse the response body to extract the generated JSON text
+	var response OllamaResponse
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse Ollama response: %v", err)
+	}
+
+	// The response from Ollama is expected to be in the format we need directly
+	return response.Response, nil
+}
 // Store the summary as the job description and mark job as processed
 func storeJobDescription(db *sql.DB, jobID, jobLink, summary string) error {
 	var parsed FlexibleJobSummary
