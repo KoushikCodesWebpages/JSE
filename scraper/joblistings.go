@@ -8,21 +8,9 @@ import (
 	"net/http"
 
 	"job_scraper/scraper/Linkedin"
-	"job_scraper/scraper/Xing"
+	// "job_scraper/scraper/Xing"
 
 )
-
-// JobResponse struct for API response
-type JobResponse struct {
-	ID         string `json:"id"`
-	JobID      string `json:"jobId"`
-	Title      string `json:"title"`
-	Company    string `json:"company"`
-	Location   string `json:"location"`
-	PostedDate string `json:"postedDate"`
-	Link       string `json:"link"`
-	Processed  bool   `json:"processed"`
-}
 
 
 
@@ -33,10 +21,10 @@ func JobListingsHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	ctx := context.Background()
 
 	//Run Xing scraper
-	if err := Xing.XingJobListingsHandler(ctx, db); err != nil {
-		http.Error(w, "Xing error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	// if err := Xing.XingJobListingsHandler(ctx, db); err != nil {
+	// 	http.Error(w, "Xing error: "+err.Error(), http.StatusInternalServerError)
+	// 	return
+	// }
 
 	// Run LinkedIn scraper
 	if err := Linkedin.LinkedinJobListingsHandler(ctx, db); err != nil {
@@ -49,15 +37,23 @@ func JobListingsHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Jobs stored from LinkedIn and Xing"})
 }
 
-
-
-
-
+// JobResponse struct for API response
+type JobResponse struct {
+	ID         string `json:"id"`
+	JobID      string `json:"jobId"`
+	Title      string `json:"title"`
+	Company    string `json:"company"`
+	Location   string `json:"location"`
+	PostedDate string `json:"postedDate"`
+	Link       string `json:"link"`
+	Processed  bool   `json:"processed"`
+	Sent       bool   `json:"sent"`
+}
 
 // ViewJobsHandler fetches jobs from both LinkedIn and Xing databases
 func ViewJobsHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Fetch LinkedIn jobs
-	linkedinRows, err := db.Query("SELECT id, jobid, title, company, location, posted_date, link, processed FROM linkedin_jobs ORDER BY posted_date DESC")
+	linkedinRows, err := db.Query("SELECT id, jobid, title, company, location, posted_date, link, processed, sent FROM linkedin_jobs ORDER BY posted_date DESC")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error fetching LinkedIn jobs: %v", err), http.StatusInternalServerError)
 		return
@@ -67,16 +63,29 @@ func ViewJobsHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var linkedinJobs []JobResponse
 	for linkedinRows.Next() {
 		var job JobResponse
-		err := linkedinRows.Scan(&job.ID, &job.JobID, &job.Title, &job.Company, &job.Location, &job.PostedDate, &job.Link, &job.Processed)
+		var sent sql.NullBool
+
+		err := linkedinRows.Scan(
+			&job.ID,
+			&job.JobID,
+			&job.Title,
+			&job.Company,
+			&job.Location,
+			&job.PostedDate,
+			&job.Link,
+			&job.Processed,
+			&sent,
+		)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Error scanning LinkedIn row: %v", err), http.StatusInternalServerError)
 			return
 		}
+		job.Sent = sent.Valid && sent.Bool
 		linkedinJobs = append(linkedinJobs, job)
 	}
 
 	// Fetch Xing jobs
-	xingRows, err := db.Query("SELECT id, jobid, title, company, location, posted_date, link, processed FROM xing_jobs ORDER BY posted_date DESC")
+	xingRows, err := db.Query("SELECT id, jobid, title, company, location, posted_date, link, processed, sent FROM xing_jobs ORDER BY posted_date DESC")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error fetching Xing jobs: %v", err), http.StatusInternalServerError)
 		return
@@ -86,11 +95,24 @@ func ViewJobsHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var xingJobs []JobResponse
 	for xingRows.Next() {
 		var job JobResponse
-		err := xingRows.Scan(&job.ID, &job.JobID, &job.Title, &job.Company, &job.Location, &job.PostedDate, &job.Link, &job.Processed)
+		var sent sql.NullBool
+
+		err := xingRows.Scan(
+			&job.ID,
+			&job.JobID,
+			&job.Title,
+			&job.Company,
+			&job.Location,
+			&job.PostedDate,
+			&job.Link,
+			&job.Processed,
+			&sent,
+		)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Error scanning Xing row: %v", err), http.StatusInternalServerError)
 			return
 		}
+		job.Sent = sent.Valid && sent.Bool
 		xingJobs = append(xingJobs, job)
 	}
 
@@ -114,4 +136,3 @@ func ViewJobsHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		"xing":     map[string]interface{}{"count": xingCount, "jobs": xingJobs},
 	})
 }
-

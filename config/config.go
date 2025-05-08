@@ -54,7 +54,8 @@ func InitializeDatabase() (*sql.DB, error) {
 			location TEXT,
 			posted_date TEXT,
 			link TEXT UNIQUE,  
-			processed BOOLEAN
+			processed BOOLEAN,
+			sent BOOLEAN
 		);`
 
 		createXingJobsTable := `
@@ -66,7 +67,8 @@ func InitializeDatabase() (*sql.DB, error) {
 			location TEXT,
 			posted_date TEXT,
 			link TEXT UNIQUE,  
-			processed BOOLEAN
+			processed BOOLEAN,
+			sent BOOLEAN
 		);`
 
 		createLinkedInJobApplicationLinksTable := `

@@ -8,13 +8,14 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	_ "github.com/mattn/go-sqlite3"
 )
 
-// Job model
+// Job model – no "sent" field
 type Job struct {
 	JobID          string `json:"job_id" bson:"job_id"`
 	Title          string `json:"title" bson:"title"`
@@ -30,59 +31,81 @@ type Job struct {
 	JobLink        string `json:"job_link" bson:"job_link"`
 }
 
-
-// UploadHandler connects to MongoDB, fetches jobs from SQLite, and prints them
+// UploadHandler handles job upload and marking as sent
+// UploadHandler handles job upload and marking as sent
+// UploadHandler handles job upload and marking as sent
 func UploadHandler(w http.ResponseWriter, r *http.Request, sqliteDB *sql.DB) {
-	// MongoDB hardcoded credentials
-	// mongoURI := "mongodb+srv://JSE:JSE@cluster0.dnetqn5.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0&tls=true"
-	mongoURI :="mongodb://localhost:27017/JSE"
+	mongoURI := "mongodb+srv://JSE:JSE@cluster0.dnetqn5.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0&tls=true"
 	mongoDBName := "JSE"
 	mongoCollectionName := "jobs"
 
-	// Connect to MongoDB
-	clientOpts := options.Client().ApplyURI(mongoURI)
-	client, err := mongo.NewClient(clientOpts)
-	if err != nil {
-		http.Error(w, "MongoDB client creation failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	// Set a larger connection pool size
+	maxPoolSize := uint64(400) // Set your desired max pool size
 
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	err = client.Connect(ctx)
+	clientOpts := options.Client().
+		ApplyURI(mongoURI).
+		SetMaxPoolSize(maxPoolSize) // Increase pool size
+
+	client, err := mongo.Connect(ctx, clientOpts)
 	if err != nil {
 		http.Error(w, "MongoDB connection failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer client.Disconnect(ctx)
 
-	log.Println("✅ Connected to MongoDB database:", mongoDBName)
+	log.Println("✅ Connected to MongoDB:", mongoDBName)
+	collection := client.Database(mongoDBName).Collection(mongoCollectionName)
 
-	// Fetch jobs from SQLite
 	jobs, err := CollectJobs(sqliteDB)
 	if err != nil {
 		http.Error(w, "Failed to collect jobs: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Insert jobs into MongoDB
-	collection := client.Database(mongoDBName).Collection(mongoCollectionName)
-	var mongoJobs []interface{}
+	insertedCount := 0
+
 	for _, job := range jobs {
-		mongoJobs = append(mongoJobs, job)
-	}
-
-	if len(mongoJobs) > 0 {
-		_, err := collection.InsertMany(ctx, mongoJobs)
-		if err != nil {
-			http.Error(w, "Failed to insert jobs into MongoDB: "+err.Error(), http.StatusInternalServerError)
-			return
+		// Skip if sent == true (No need to upload this job)
+		if job.Processed {
+			continue
 		}
-		log.Printf("✅ Inserted %d jobs into MongoDB", len(mongoJobs))
+
+		// Check if job already exists
+		var existingJob Job
+		err := collection.FindOne(ctx, bson.M{"job_id": job.JobID}).Decode(&existingJob)
+		if err == nil {
+			// Job already exists, skip it
+			log.Printf("Job with job_id %s already exists, skipping insertion", job.JobID)
+			continue
+		}
+
+		// Insert the job into MongoDB
+		_, err = collection.InsertOne(ctx, job)
+		if err != nil {
+			log.Printf("❌ Failed to insert job %s: %v", job.JobID, err)
+			continue
+		}
+
+		// Mark the job as sent in SQLite
+		table := "linkedin_jobs"
+		if job.Source == "Xing" {
+			table = "xing_jobs"
+		}
+		updateQuery := fmt.Sprintf("UPDATE %s SET sent = TRUE WHERE id = ?", table)
+		if _, err := sqliteDB.Exec(updateQuery, job.JobID); err != nil {
+			log.Printf("❌ Failed to mark job %s as sent: %v", job.JobID, err)
+			continue
+		}
+
+		insertedCount++
 	}
 
-	// Retrieve all jobs from MongoDB
+	log.Printf("✅ Inserted %d jobs into MongoDB and marked as sent", insertedCount)
+
+	// Fetch inserted jobs for confirmation
 	cursor, err := collection.Find(ctx, bson.D{})
 	if err != nil {
 		http.Error(w, "Failed to retrieve jobs from MongoDB: "+err.Error(), http.StatusInternalServerError)
@@ -105,24 +128,20 @@ func UploadHandler(w http.ResponseWriter, r *http.Request, sqliteDB *sql.DB) {
 		return
 	}
 
-	// Output jobs from MongoDB as JSON
 	w.Header().Set("Content-Type", "application/json")
-	err = json.NewEncoder(w).Encode(mongoJobsList)
-	if err != nil {
+	if err := json.NewEncoder(w).Encode(mongoJobsList); err != nil {
 		http.Error(w, "Failed to encode jobs to JSON: "+err.Error(), http.StatusInternalServerError)
-		return
 	}
 }
 
-
-// CollectJobs fetches LinkedIn and Xing jobs from SQLite
+// CollectJobs fetches jobs from LinkedIn and Xing in SQLite, skipping sent == true
 func CollectJobs(db *sql.DB) ([]Job, error) {
 	var jobs []Job
 
 	// LinkedIn Jobs
 	rowsLinkedIn, err := db.Query(`
 		SELECT 
-			lj.id, lj.title, lj.company, lj.location, lj.posted_date, lj.link, lj.processed,
+			lj.id, lj.title, lj.company, lj.location, lj.posted_date, lj.link, lj.processed, lj.sent,
 			ljd.job_description, ljd.job_type, ljd.skills,
 			ljal.job_link
 		FROM linkedin_job_application_links ljal
@@ -137,11 +156,19 @@ func CollectJobs(db *sql.DB) ([]Job, error) {
 	for rowsLinkedIn.Next() {
 		var job Job
 		var desc, typ, skills, jobLink sql.NullString
-		err := rowsLinkedIn.Scan(&job.JobID, &job.Title, &job.Company, &job.Location, &job.PostedDate, &job.Link, &job.Processed,
+		var sent sql.NullBool
+
+		err := rowsLinkedIn.Scan(&job.JobID, &job.Title, &job.Company, &job.Location, &job.PostedDate, &job.Link, &job.Processed, &sent,
 			&desc, &typ, &skills, &jobLink)
 		if err != nil {
 			return nil, fmt.Errorf("LinkedIn scan error: %v", err)
 		}
+
+		// Skip if sent == true
+		if sent.Valid && sent.Bool {
+			continue
+		}
+
 		if desc.Valid {
 			job.JobDescription = desc.String
 		}
@@ -161,7 +188,7 @@ func CollectJobs(db *sql.DB) ([]Job, error) {
 	// Xing Jobs
 	rowsXing, err := db.Query(`
 		SELECT 
-			xjal.job_id, xj.title, xj.company, xj.location, xj.posted_date, xj.link, xj.processed,
+			xj.id, xj.title, xj.company, xj.location, xj.posted_date, xj.link, xj.processed, xj.sent,
 			xjd.job_description, xjd.job_type, xjd.skills,
 			xjal.job_link
 		FROM xing_job_application_links xjal
@@ -176,11 +203,19 @@ func CollectJobs(db *sql.DB) ([]Job, error) {
 	for rowsXing.Next() {
 		var job Job
 		var desc, typ, skills, jobLink sql.NullString
-		err := rowsXing.Scan(&job.JobID, &job.Title, &job.Company, &job.Location, &job.PostedDate, &job.Link, &job.Processed,
+		var sent sql.NullBool
+
+		err := rowsXing.Scan(&job.JobID, &job.Title, &job.Company, &job.Location, &job.PostedDate, &job.Link, &job.Processed, &sent,
 			&desc, &typ, &skills, &jobLink)
 		if err != nil {
 			return nil, fmt.Errorf("xing scan error: %v", err)
 		}
+
+		// Skip if sent == true
+		if sent.Valid && sent.Bool {
+			continue
+		}
+
 		if desc.Valid {
 			job.JobDescription = desc.String
 		}

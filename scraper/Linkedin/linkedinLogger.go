@@ -89,7 +89,7 @@ func LoginLinkedInHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 				// ✅ Mark job as "being processed" immediately
 				updateQuery := `
 					UPDATE linkedin_jobs 
-					SET processed = TRUE 
+					SET processed = FALSE 
 					WHERE id = ?
 				`
 				_, err := db.Exec(updateQuery, jobIDStr)
@@ -102,7 +102,7 @@ func LoginLinkedInHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 				jobCtxBase, cancelBase := chromedp.NewContext(allocatorCtx)
 				defer cancelBase()
 	
-				jobCtx, cancelJob := context.WithTimeout(jobCtxBase, 40*time.Second)
+				jobCtx, cancelJob := context.WithTimeout(jobCtxBase, 30*time.Second)
 				defer cancelJob()
 	
 				startTime := time.Now()

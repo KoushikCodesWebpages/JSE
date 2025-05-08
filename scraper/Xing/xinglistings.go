@@ -172,7 +172,7 @@ func fetchAndStoreXingJobs(ctx context.Context, db *sql.DB, jobTitles []string, 
 					continue
 				}
 				count++
-				if count >= 5 {
+				if count >= 2 {
 					break
 				}
 			}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"net/url"
 	//"time"
 
 	"github.com/chromedp/chromedp"
@@ -24,6 +25,43 @@ func StopChrome() {
 	}
 }
 
+
+
+func isLinkedInRelated(rawURL string) bool {
+    // Check if the first 30 chars mention "linkedin"
+    trimmed := rawURL
+    if len(rawURL) > 30 {
+        trimmed = rawURL[:30]
+    }
+    if strings.Contains(trimmed, "linkedin") {
+        return true
+    }
+
+    parsedURL, err := url.Parse(rawURL)
+    if err != nil {
+        return false
+    }
+
+    host := parsedURL.Hostname()
+    if strings.Contains(host, "linkedin.com") || strings.HasSuffix(host, "linkedin.com") || strings.HasPrefix(host, "linkedin.") {
+        return true
+    }
+
+	    // Reject if source=linkedin (strict check)
+		for key, values := range parsedURL.Query() {
+			if strings.ToLower(key) == "source" {
+				for _, val := range values {
+					if strings.ToLower(val) == "linkedin" {
+						return false
+					}
+				}
+			}
+		}
+
+    return false
+}
+
+
 func captureAndCloseNewTab(ctx context.Context, db *sql.DB, jobID string, existingTabs map[target.ID]struct{}) error {
 	var newTabID target.ID
 	var cleanURL string
@@ -37,16 +75,21 @@ func captureAndCloseNewTab(ctx context.Context, db *sql.DB, jobID string, existi
 
 	// Find new tab that is NOT a LinkedIn page
 	for _, t := range newTabs {
-		if _, exists := existingTabs[t.TargetID]; !exists && t.Type == "page" && t.URL != "" && !strings.Contains(t.URL, "linkedin.com") {
+		if _, exists := existingTabs[t.TargetID]; !exists && t.Type == "page" && t.URL != "" {
+			if isLinkedInRelated(t.URL) {
+				continue // Skip if the host is a LinkedIn domain
+			}
+	
 			cleanURL = strings.TrimSpace(t.URL)
 			if cleanURL == "" {
 				continue
 			}
-
+	
 			newTabID = t.TargetID
 			break
 		}
 	}
+	
 
 	if newTabID == "" {
 		log.Printf("⚠️ No new non-LinkedIn tab found.")
